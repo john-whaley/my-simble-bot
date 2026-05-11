@@ -9,6 +9,8 @@ venv/
 env/
 .env
 config.ini
+config[0-9]*.ini
+.msb-bots.json
 data/*
 !data/.gitkeep
 logs/*

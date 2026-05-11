@@ -12,6 +12,8 @@ env/
 
 # Config
 config.ini
+config[0-9]*.ini
+.msb-bots.json
 
 # Runtime data
 data/*

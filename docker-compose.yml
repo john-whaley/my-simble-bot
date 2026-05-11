@@ -6,6 +6,9 @@ services:
     container_name: my-simple-bot
     init: true
     restart: unless-stopped
+    read_only: true
+    tmpfs:
+      - /tmp
     environment:
       TZ: Asia/Shanghai
       CONFIG_FILE: /app/config.ini
@@ -13,6 +16,13 @@ services:
       - ./config.ini:/app/config.ini:ro
       - ./data:/app/data
       - ./logs:/app/logs
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    pids_limit: 128
+    mem_limit: 256m
+    cpus: 1.0
     logging:
       driver: json-file
       options:

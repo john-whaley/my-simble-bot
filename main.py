@@ -13,6 +13,7 @@ import sqlite3
 import time
 from dataclasses import dataclass
 from datetime import datetime
+from logging.handlers import RotatingFileHandler
 from pathlib import Path
 from typing import Optional, Union
 
@@ -71,7 +72,12 @@ def setup_logging() -> None:
     root_logger.handlers.clear()
 
     stream_handler = logging.StreamHandler()
-    file_handler = logging.FileHandler(LOG_PATH, encoding="utf-8")
+    file_handler = RotatingFileHandler(
+        LOG_PATH,
+        maxBytes=10 * 1024 * 1024,
+        backupCount=5,
+        encoding="utf-8",
+    )
 
     stream_handler.setFormatter(formatter)
     file_handler.setFormatter(formatter)
