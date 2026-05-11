@@ -678,10 +678,11 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         else ""
     )
     await message.reply_text(
-        "欢迎使用极简投稿机器人。\n"
+        "欢迎使用发言机器人。\n"
         f"{channel_line}"
-        "直接给我发送文字，我会自动投稿到频道。\n"
-        "机器人只接收文本信息，表情符号可以，图片、视频、语音、文件不会处理。\n\n"
+        "直接给我发送文字，我会自动在频道发言。\n"
+        "请不要攻击他人，不刷屏，不发布违法信息。\n"
+        "我只接收文本信息，表情符号可以，图片、视频、语音、文件不会处理。\n\n"
         "可用命令：\n"
         "/myposts - 查看我的投稿\n"
         "/mystats - 查看我的统计"
@@ -880,7 +881,7 @@ async def ban_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         await message.reply_text("不能封禁管理员账号。")
         return
 
-    reason = " ".join(context.args[1:]).strip() or "管理员手动封禁"
+    reason = " ".join(context.args[1:]).strip() or "触发风控自动封禁"
     profile = await asyncio.to_thread(get_latest_user_profile, target_user_id)
     created, banned_at = await asyncio.to_thread(
         upsert_banned_user,

@@ -11,7 +11,7 @@ CHANNEL_LINK = @your_channel
 #  用户 ID，可填写多个，用英文逗号分隔
 ADMIN_IDS = 123456789,987654321
 
-# 用户发言冷却时间，单位秒；管理员不受限制
+# 用户发言冷却时间，单位秒；
 USER_MESSAGE_COOLDOWN = 30
 
 [FILTER]
