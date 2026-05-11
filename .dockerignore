@@ -1,0 +1,15 @@
+__pycache__/
+*.py[cod]
+*.log
+.git/
+.gitignore
+.venv/
+.venv*/
+venv/
+env/
+.env
+config.ini
+data/*
+!data/.gitkeep
+logs/*
+!logs/.gitkeep

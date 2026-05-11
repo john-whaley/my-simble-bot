@@ -1,0 +1,26 @@
+# Python
+__pycache__/
+*.py[cod]
+*.so
+.Python
+.venv/
+.venv*/
+venv/
+env/
+.env
+.DS_Store
+
+# Config
+config.ini
+
+# Runtime data
+data/*
+!data/.gitkeep
+logs/*
+!logs/.gitkeep
+*.log
+
+# IDE
+.vscode/
+.idea/
+*.swp

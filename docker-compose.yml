@@ -1,0 +1,20 @@
+services:
+  bot:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: my-simple-bot
+    init: true
+    restart: unless-stopped
+    environment:
+      TZ: Asia/Shanghai
+      CONFIG_FILE: /app/config.ini
+    volumes:
+      - ./config.ini:/app/config.ini:ro
+      - ./data:/app/data
+      - ./logs:/app/logs
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
