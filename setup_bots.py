@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import configparser
 import json
 import sqlite3
 import re
@@ -101,11 +102,15 @@ def validate_bot_name(value: str) -> bool:
 
 def load_manifest() -> list[BotDefinition]:
     if not MANIFEST_PATH.exists():
-        return []
+        discovered_bots = discover_existing_bots()
+        if discovered_bots:
+            save_manifest(discovered_bots)
+        return discovered_bots
 
     raw = json.loads(MANIFEST_PATH.read_text(encoding="utf-8"))
     bots: list[BotDefinition] = []
     for item in raw:
+        item.setdefault("token", "")
         bots.append(BotDefinition(**item))
     return bots
 
@@ -115,6 +120,73 @@ def save_manifest(bots: list[BotDefinition]) -> None:
         json.dumps([asdict(bot) for bot in bots], ensure_ascii=False, indent=2) + "\n",
         encoding="utf-8",
     )
+
+
+def parse_generated_services() -> dict[str, str]:
+    if not DOCKER_COMPOSE_PATH.exists():
+        return {}
+
+    service_for_config: dict[str, str] = {}
+    current_service = ""
+
+    for raw_line in DOCKER_COMPOSE_PATH.read_text(encoding="utf-8").splitlines():
+        line = raw_line.rstrip()
+        service_match = re.fullmatch(r"  ([A-Za-z][A-Za-z0-9_-]{0,49}):", line)
+        if service_match:
+            current_service = service_match.group(1)
+            continue
+
+        config_match = re.search(r"\./(config\d+\.ini):/app/\1:ro", line)
+        if current_service and config_match:
+            service_for_config[config_match.group(1)] = current_service
+
+    return service_for_config
+
+
+def discover_existing_bots() -> list[BotDefinition]:
+    service_mapping = parse_generated_services()
+    bots: list[BotDefinition] = []
+
+    for config_path in sorted(BASE_DIR.glob("config[0-9]*.ini")):
+        match = re.fullmatch(r"config(\d+)\.ini", config_path.name)
+        if not match:
+            continue
+
+        index = int(match.group(1))
+        service_name = service_mapping.get(config_path.name, f"bot{index}")
+
+        parser = configparser.ConfigParser()
+        parser.read(config_path, encoding="utf-8")
+
+        token = parser.get("BOT", "TOKEN", fallback="").strip()
+        channel_id = parser.get("BOT", "CHANNEL_ID", fallback="").strip()
+        channel_link = parser.get("BOT", "CHANNEL_LINK", fallback="").strip()
+        admin_ids = parser.get("BOT", "ADMIN_IDS", fallback="").strip()
+        user_message_cooldown = parser.get(
+            "BOT",
+            "USER_MESSAGE_COOLDOWN",
+            fallback="30",
+        ).strip()
+        blacklist = parser.get("FILTER", "BLACKLIST", fallback="").strip()
+
+        bots.append(
+            BotDefinition(
+                index=index,
+                service_name=service_name,
+                container_name=f"my-simple-bot-{service_name}",
+                config_filename=config_path.name,
+                data_dir=f"./data/{service_name}",
+                logs_dir=f"./logs/{service_name}",
+                token=token,
+                channel_id=channel_id,
+                channel_link=channel_link,
+                admin_ids=admin_ids,
+                user_message_cooldown=user_message_cooldown or "30",
+                blacklist=blacklist,
+            )
+        )
+
+    return bots
 
 
 def build_bot_definition(existing_names: set[str], index: int) -> BotDefinition:
@@ -252,6 +324,55 @@ def render_docker_compose(bots: list[BotDefinition]) -> str:
     return "\n".join(lines) + "\n"
 
 
+def initialize_database_schema(db_path: Path) -> None:
+    connection = sqlite3.connect(db_path)
+    try:
+        connection.execute(
+            """
+            CREATE TABLE IF NOT EXISTS messages (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL,
+                username TEXT,
+                first_name TEXT NOT NULL,
+                last_name TEXT,
+                message_text TEXT NOT NULL,
+                is_published INTEGER NOT NULL DEFAULT 0,
+                is_blocked INTEGER NOT NULL DEFAULT 0,
+                created_at DATETIME NOT NULL,
+                published_at DATETIME
+            )
+            """
+        )
+        connection.execute(
+            """
+            CREATE TABLE IF NOT EXISTS banned_users (
+                user_id INTEGER PRIMARY KEY,
+                username TEXT,
+                first_name TEXT,
+                last_name TEXT,
+                reason TEXT NOT NULL,
+                banned_at DATETIME NOT NULL,
+                banned_by INTEGER
+            )
+            """
+        )
+        connection.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_messages_user_created
+            ON messages (user_id, created_at DESC)
+            """
+        )
+        connection.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_messages_created_at
+            ON messages (created_at DESC)
+            """
+        )
+        connection.commit()
+    finally:
+        connection.close()
+
+
 def ensure_runtime_directories_and_databases(bots: list[BotDefinition]) -> list[str]:
     actions: list[str] = []
     (BASE_DIR / "data").mkdir(parents=True, exist_ok=True)
@@ -268,8 +389,8 @@ def ensure_runtime_directories_and_databases(bots: list[BotDefinition]) -> list[
             actions.append(f"{bot.service_name}: 保留已有数据库 {db_path.name}")
             continue
 
-        sqlite3.connect(db_path).close()
-        actions.append(f"{bot.service_name}: 已创建数据库 {db_path.name}")
+        initialize_database_schema(db_path)
+        actions.append(f"{bot.service_name}: 已创建数据库并初始化表结构 {db_path.name}")
 
     return actions
 

@@ -15,7 +15,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
-from typing import Optional, Union
+from typing import Awaitable, Callable, Optional, TypeVar, Union
 
 from telegram import (
     BotCommand,
@@ -26,6 +26,7 @@ from telegram import (
     Update,
 )
 from telegram.constants import ParseMode
+from telegram.error import BadRequest, NetworkError
 from telegram.ext import (
     Application,
     CallbackQueryHandler,
@@ -34,6 +35,7 @@ from telegram.ext import (
     MessageHandler,
     filters,
 )
+from telegram.request import HTTPXRequest
 
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -45,6 +47,7 @@ LOG_PATH = LOG_DIR / "bot.log"
 
 logger = logging.getLogger(__name__)
 MESSAGE_COOLDOWNS: dict[int, float] = {}
+T = TypeVar("T")
 
 
 @dataclass(frozen=True)
@@ -148,8 +151,6 @@ def load_settings() -> Settings:
         )
 
     admin_ids = parse_admin_ids(admin_ids_raw)
-    if not admin_ids:
-        raise ValueError("BOT.ADMIN_IDS is required and must contain at least one ID.")
 
     try:
         cooldown_seconds = max(0, int(cooldown_raw or "30"))
@@ -170,6 +171,17 @@ def get_db_connection() -> sqlite3.Connection:
     connection = sqlite3.connect(DB_PATH)
     connection.row_factory = sqlite3.Row
     return connection
+
+
+def build_httpx_request(*, read_timeout: float) -> HTTPXRequest:
+    return HTTPXRequest(
+        connection_pool_size=32,
+        connect_timeout=20.0,
+        read_timeout=read_timeout,
+        write_timeout=20.0,
+        pool_timeout=10.0,
+        http_version="1.1",
+    )
 
 
 def init_db() -> None:
@@ -565,12 +577,15 @@ async def notify_admins(
 ) -> None:
     for admin_id in settings.admin_ids:
         try:
-            await context.bot.send_message(
-                chat_id=admin_id,
-                text=text,
-                parse_mode=ParseMode.HTML,
-                reply_markup=reply_markup,
-                disable_web_page_preview=True,
+            await telegram_api_call(
+                lambda admin_id=admin_id: context.bot.send_message(
+                    chat_id=admin_id,
+                    text=text,
+                    parse_mode=ParseMode.HTML,
+                    reply_markup=reply_markup,
+                    disable_web_page_preview=True,
+                ),
+                operation=f"notify admin {admin_id}",
             )
         except Exception:
             logger.exception("Failed to notify admin_id=%s", admin_id)
@@ -597,16 +612,17 @@ def parse_target_user_id(argument: str) -> int:
     return int(value)
 
 
-async def setup_bot_commands(application: Application) -> None:
-    settings: Settings = application.bot_data["settings"]
-
-    user_commands = [
+def build_user_commands() -> list[BotCommand]:
+    return [
         BotCommand("start", "开始使用机器人"),
         BotCommand("help", "查看帮助"),
         BotCommand("myposts", "查看我的投稿"),
         BotCommand("mystats", "查看个人统计"),
     ]
-    admin_commands = [
+
+
+def build_admin_commands() -> list[BotCommand]:
+    return [
         BotCommand("start", "开始使用机器人"),
         BotCommand("help", "查看帮助"),
         BotCommand("banned", "查看黑名单"),
@@ -616,16 +632,85 @@ async def setup_bot_commands(application: Application) -> None:
         BotCommand("userlist", "查看最近用户列表"),
     ]
 
-    await application.bot.set_my_commands(
-        user_commands,
-        scope=BotCommandScopeDefault(),
+
+async def telegram_api_call(
+    func: Callable[[], Awaitable[T]],
+    *,
+    operation: str,
+    attempts: int = 3,
+    initial_delay: float = 1.5,
+) -> T:
+    delay = initial_delay
+    last_error: Optional[NetworkError] = None
+
+    for attempt in range(1, attempts + 1):
+        try:
+            return await func()
+        except NetworkError as exc:
+            last_error = exc
+            if attempt >= attempts:
+                break
+
+            logger.warning(
+                "Telegram API call failed during %s (attempt %s/%s): %s. Retrying in %.1f seconds.",
+                operation,
+                attempt,
+                attempts,
+                exc,
+                delay,
+            )
+            await asyncio.sleep(delay)
+            delay *= 2
+
+    if last_error is None:
+        raise RuntimeError(f"Telegram API call failed unexpectedly during {operation}.")
+    raise last_error
+
+
+async def ensure_user_command_scope(
+    application: Application,
+    user_id: int,
+    is_admin_user: bool,
+) -> None:
+    commands = build_admin_commands() if is_admin_user else build_user_commands()
+    try:
+        await telegram_api_call(
+            lambda: application.bot.set_my_commands(
+                commands,
+                scope=BotCommandScopeChat(chat_id=user_id),
+            ),
+            operation=f"refresh command scope for user {user_id}",
+        )
+    except Exception:
+        logger.exception(
+            "Failed to refresh command scope for user_id=%s is_admin=%s",
+            user_id,
+            is_admin_user,
+        )
+
+
+async def setup_bot_commands(application: Application) -> None:
+    settings: Settings = application.bot_data["settings"]
+
+    user_commands = build_user_commands()
+    admin_commands = build_admin_commands()
+
+    await telegram_api_call(
+        lambda: application.bot.set_my_commands(
+            user_commands,
+            scope=BotCommandScopeDefault(),
+        ),
+        operation="set default bot commands",
     )
 
     for admin_id in settings.admin_ids:
         try:
-            await application.bot.set_my_commands(
-                admin_commands,
-                scope=BotCommandScopeChat(chat_id=admin_id),
+            await telegram_api_call(
+                lambda admin_id=admin_id: application.bot.set_my_commands(
+                    admin_commands,
+                    scope=BotCommandScopeChat(chat_id=admin_id),
+                ),
+                operation=f"set admin commands for {admin_id}",
             )
         except Exception:
             logger.exception("Failed to set scoped commands for admin_id=%s", admin_id)
@@ -634,11 +719,31 @@ async def setup_bot_commands(application: Application) -> None:
 async def validate_channel_access(application: Application) -> None:
     settings: Settings = application.bot_data["settings"]
     try:
-        chat = await application.bot.get_chat(settings.channel_id)
+        chat = await telegram_api_call(
+            lambda: application.bot.get_chat(settings.channel_id),
+            operation=f"validate target channel {settings.channel_id}",
+            attempts=4,
+            initial_delay=2.0,
+        )
         logger.info(
             "Verified target channel access: id=%s title=%s",
             settings.channel_id,
             getattr(chat, "title", None),
+        )
+    except BadRequest as exc:
+        logger.error(
+            "Cannot access target channel %s because the configuration is invalid or the bot lacks access: %s",
+            settings.channel_id,
+            exc,
+        )
+        raise RuntimeError(
+            "Target channel is not accessible. Please check BOT.CHANNEL_ID, confirm the bot has been added to the channel, and make sure it can send messages."
+        ) from exc
+    except NetworkError as exc:
+        logger.warning(
+            "Skipping startup channel validation for %s because Telegram is temporarily unreachable: %s",
+            settings.channel_id,
+            exc,
         )
     except Exception as exc:
         logger.error(
@@ -663,6 +768,12 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
 
     if user is None or message is None:
         return
+
+    await ensure_user_command_scope(
+        context.application,
+        user.id,
+        is_admin(user.id, settings),
+    )
 
     if is_admin(user.id, settings):
         await message.reply_text(
@@ -1133,9 +1244,12 @@ async def handle_user_submission(
         return
 
     try:
-        await context.bot.send_message(
-            chat_id=settings.channel_id,
-            text=build_channel_message(text, user.username),
+        await telegram_api_call(
+            lambda: context.bot.send_message(
+                chat_id=settings.channel_id,
+                text=build_channel_message(text, user.username),
+            ),
+            operation=f"publish submission {record_id}",
         )
         published_at = await asyncio.to_thread(mark_message_as_published, record_id)
         await notify_admins(
@@ -1183,6 +1297,8 @@ def main() -> None:
     application = (
         Application.builder()
         .token(settings.token)
+        .request(build_httpx_request(read_timeout=20.0))
+        .get_updates_request(build_httpx_request(read_timeout=35.0))
         .post_init(post_init)
         .build()
     )
@@ -1224,7 +1340,7 @@ def main() -> None:
         "Bot is starting with %s admin(s) configured",
         len(settings.admin_ids),
     )
-    application.run_polling()
+    application.run_polling(bootstrap_retries=5)
 
 
 if __name__ == "__main__":
