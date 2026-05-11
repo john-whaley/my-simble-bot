@@ -100,6 +100,7 @@ python3 setup_bots.py
    - `1` 使用默认名称，例如 `bot1`、`bot2`
    - `2` 自定义机器人名称
 2. 依次填写：
+   - `TOKEN`，必填
    - `CHANNEL_ID`，必填
    - `CHANNEL_LINK`，必填，格式必须是 `@***`
    - `ADMIN_IDS`，选填，默认空
@@ -147,11 +148,23 @@ python3 setup_bots.py
 
 - `msb`
 
-建议在 Debian 13 上执行一次：
+如果你当前就在项目目录里，直接运行：
+
+```bash
+./msb
+```
+
+说明：
+
+- Linux 默认不会自动在当前目录里查找命令，所以直接输入 `msb` 往往会提示 `command not found`
+- 在项目目录内，应该优先使用 `./msb`
+
+如果你希望在任意目录里直接输入 `msb`，再执行一次：
 
 ```bash
 chmod +x msb
-sudo ln -sf /opt/my-simple-bot/msb /usr/local/bin/msb
+sudo ln -sf "$(pwd)/msb" /usr/local/bin/msb
+hash -r
 ```
 
 这样后面你在项目目录里或系统里都可以直接输入：
@@ -218,6 +231,12 @@ git pull
 ```
 
 如果你需要继续增加机器人：
+
+```bash
+./msb
+```
+
+如果你已经正确创建了 `/usr/local/bin/msb` 软链接，也可以直接执行：
 
 ```bash
 msb

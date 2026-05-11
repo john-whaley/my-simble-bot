@@ -24,6 +24,7 @@ class BotDefinition:
     config_filename: str
     data_dir: str
     logs_dir: str
+    token: str
     channel_id: str
     channel_link: str
     admin_ids: str
@@ -73,6 +74,10 @@ def ask_optional(
 
 def validate_channel_id(value: str) -> bool:
     return bool(re.fullmatch(r"-?\d+", value))
+
+
+def validate_token(value: str) -> bool:
+    return len(value) >= 10 and ":" in value and " " not in value
 
 
 def validate_channel_link(value: str) -> bool:
@@ -141,6 +146,11 @@ def build_bot_definition(existing_names: set[str], index: int) -> BotDefinition:
     if service_name in existing_names:
         raise ValueError(f"机器人名称重复: {service_name}")
 
+    token = ask_required(
+        "请输入 TOKEN（必填）",
+        validator=validate_token,
+        error_message="TOKEN 格式无效，通常应类似 123456:ABCDEF... 。",
+    )
     channel_id = ask_required(
         "请输入 CHANNEL_ID（必填）",
         validator=validate_channel_id,
@@ -175,6 +185,7 @@ def build_bot_definition(existing_names: set[str], index: int) -> BotDefinition:
         config_filename=f"config{index}.ini",
         data_dir=f"./data/{service_name}",
         logs_dir=f"./logs/{service_name}",
+        token=token,
         channel_id=channel_id,
         channel_link=channel_link,
         admin_ids=admin_ids,
@@ -186,7 +197,7 @@ def build_bot_definition(existing_names: set[str], index: int) -> BotDefinition:
 def render_config(bot: BotDefinition) -> str:
     return (
         "[BOT]\n"
-        "TOKEN = your_bot_token_here\n"
+        f"TOKEN = {bot.token}\n"
         f"CHANNEL_ID = {bot.channel_id}\n"
         f"CHANNEL_LINK = {bot.channel_link}\n"
         f"ADMIN_IDS = {bot.admin_ids}\n"
