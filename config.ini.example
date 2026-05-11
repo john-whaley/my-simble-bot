@@ -5,10 +5,13 @@ TOKEN = your_bot_token_here
 # 目标频道 ID，推荐格式：-100xxxxxxxxxx
 CHANNEL_ID = your_channel_id_here
 
-# 管理员 Telegram 用户 ID，可填写多个，用英文逗号分隔
+# 展示给用户的频道链接，格式：@your_channel
+CHANNEL_LINK = @your_channel
+
+#  用户 ID，可填写多个，用英文逗号分隔
 ADMIN_IDS = 123456789,987654321
 
-# 普通用户发言冷却时间，单位秒；管理员不受限制
+# 用户发言冷却时间，单位秒；管理员不受限制
 USER_MESSAGE_COOLDOWN = 30
 
 [FILTER]

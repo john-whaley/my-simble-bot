@@ -50,6 +50,7 @@ MESSAGE_COOLDOWNS: dict[int, float] = {}
 class Settings:
     token: str
     channel_id: Union[int, str]
+    channel_link: str
     admin_ids: set[int]
     blacklist_words: list[str]
     user_message_cooldown: int
@@ -86,6 +87,17 @@ def parse_channel_id(raw_value: str) -> Union[int, str]:
     return value
 
 
+def normalize_channel_link(raw_value: str) -> str:
+    value = raw_value.strip()
+    if not value:
+        return ""
+    if not value.startswith("@"):
+        raise ValueError("BOT.CHANNEL_LINK must start with @, for example @your_channel.")
+    if not re.fullmatch(r"@[A-Za-z0-9_]{4,}", value):
+        raise ValueError("BOT.CHANNEL_LINK format is invalid.")
+    return value
+
+
 def parse_blacklist(raw_value: str) -> list[str]:
     return [word.strip() for word in raw_value.split(",") if word.strip()]
 
@@ -117,6 +129,7 @@ def load_settings() -> Settings:
 
     token = config.get("BOT", "TOKEN", fallback="").strip()
     channel_id_raw = config.get("BOT", "CHANNEL_ID", fallback="").strip()
+    channel_link_raw = config.get("BOT", "CHANNEL_LINK", fallback="").strip()
     admin_ids_raw = config.get("BOT", "ADMIN_IDS", fallback="").strip()
     blacklist_raw = config.get("FILTER", "BLACKLIST", fallback="")
     cooldown_raw = config.get("BOT", "USER_MESSAGE_COOLDOWN", fallback="30").strip()
@@ -140,6 +153,7 @@ def load_settings() -> Settings:
     return Settings(
         token=token,
         channel_id=parse_channel_id(channel_id_raw),
+        channel_link=normalize_channel_link(channel_link_raw),
         admin_ids=admin_ids,
         blacklist_words=parse_blacklist(blacklist_raw),
         user_message_cooldown=cooldown_seconds,
@@ -383,6 +397,52 @@ def get_user_posts_and_stats(user_id: int, limit: int) -> tuple[dict[str, Option
     return get_user_stats(user_id), get_user_posts(user_id, limit)
 
 
+def get_recent_users_with_messages(
+    user_limit: int = 20,
+    message_limit: int = 3,
+) -> list[dict[str, object]]:
+    with get_db_connection() as connection:
+        user_rows = connection.execute(
+            """
+            SELECT
+                user_id,
+                COALESCE(MAX(username), '') AS username,
+                COALESCE(MAX(first_name), '') AS first_name,
+                COALESCE(MAX(last_name), '') AS last_name,
+                MAX(id) AS latest_id
+            FROM messages
+            GROUP BY user_id
+            ORDER BY latest_id DESC
+            LIMIT ?
+            """,
+            (user_limit,),
+        ).fetchall()
+
+        results: list[dict[str, object]] = []
+        for row in user_rows:
+            message_rows = connection.execute(
+                """
+                SELECT message_text
+                FROM messages
+                WHERE user_id = ?
+                ORDER BY id DESC
+                LIMIT ?
+                """,
+                (row["user_id"], message_limit),
+            ).fetchall()
+            results.append(
+                {
+                    "user_id": row["user_id"],
+                    "username": row["username"],
+                    "first_name": row["first_name"],
+                    "last_name": row["last_name"],
+                    "messages": [message_row["message_text"] for message_row in message_rows],
+                }
+            )
+
+    return results
+
+
 def get_user_stats(user_id: int) -> dict[str, Optional[str]]:
     with get_db_connection() as connection:
         row = connection.execute(
@@ -547,6 +607,7 @@ async def setup_bot_commands(application: Application) -> None:
         BotCommand("ban", "封禁用户"),
         BotCommand("unban", "解封用户"),
         BotCommand("searchuser", "按用户ID查询记录"),
+        BotCommand("userlist", "查看最近用户列表"),
     ]
 
     await application.bot.set_my_commands(
@@ -564,8 +625,29 @@ async def setup_bot_commands(application: Application) -> None:
             logger.exception("Failed to set scoped commands for admin_id=%s", admin_id)
 
 
+async def validate_channel_access(application: Application) -> None:
+    settings: Settings = application.bot_data["settings"]
+    try:
+        chat = await application.bot.get_chat(settings.channel_id)
+        logger.info(
+            "Verified target channel access: id=%s title=%s",
+            settings.channel_id,
+            getattr(chat, "title", None),
+        )
+    except Exception as exc:
+        logger.error(
+            "Cannot access target channel %s. Check BOT.CHANNEL_ID, confirm the bot is already added to the channel and has permission to send messages. Error: %s",
+            settings.channel_id,
+            exc,
+        )
+        raise RuntimeError(
+            "Target channel is not accessible. Please check BOT.CHANNEL_ID and bot permissions."
+        ) from exc
+
+
 async def post_init(application: Application) -> None:
     await setup_bot_commands(application)
+    await validate_channel_access(application)
 
 
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -584,13 +666,20 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
             "/banned - 查看黑名单\n"
             "/ban <用户ID> [原因] - 封禁用户\n"
             "/unban <用户ID> - 解封用户\n"
-            "/searchuser <用户ID> [数量] - 查询该用户的投稿和统计\n\n"
+            "/searchuser <用户ID> [数量] - 查询该用户的投稿和统计\n"
+            "/userlist - 查看最近 20 位用户和最近 3 条发言\n\n"
             "说明：机器人只接收文本投稿，表情符号可以，图片、视频、语音、文件不会入库。"
         )
         return
 
+    channel_line = (
+        f"投稿频道：{settings.channel_link}\n"
+        if settings.channel_link
+        else ""
+    )
     await message.reply_text(
         "欢迎使用极简投稿机器人。\n"
+        f"{channel_line}"
         "直接给我发送文字，我会自动投稿到频道。\n"
         "机器人只接收文本信息，表情符号可以，图片、视频、语音、文件不会处理。\n\n"
         "可用命令：\n"
@@ -726,6 +815,43 @@ async def searchuser_command(update: Update, context: ContextTypes.DEFAULT_TYPE)
                     f"内容：{html.escape(preview)}",
                 ]
             )
+
+    await message.reply_text("\n".join(lines), parse_mode=ParseMode.HTML)
+
+
+async def userlist_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    user = update.effective_user
+    message = update.effective_message
+    settings: Settings = context.application.bot_data["settings"]
+
+    if user is None or message is None:
+        return
+    if not is_admin(user.id, settings):
+        await message.reply_text("只有管理员可以使用这个命令。")
+        return
+
+    users = await asyncio.to_thread(get_recent_users_with_messages, 20, 3)
+    if not users:
+        await message.reply_text("当前还没有用户发言记录。")
+        return
+
+    lines = ["👥 <b>最近 20 位用户</b>"]
+    for item in users:
+        username = item["username"]
+        if username:
+            user_label = f"@{username}"
+        else:
+            user_label = f"用户{item['user_id']}"
+
+        previews = []
+        for raw_text in item["messages"]:
+            preview = str(raw_text).replace("\n", " ").strip()
+            if len(preview) > 20:
+                preview = f"{preview[:20]}..."
+            previews.append(html.escape(preview))
+
+        joined_messages = "；".join(previews) if previews else "暂无消息"
+        lines.append(f"{html.escape(user_label)} {joined_messages}")
 
     await message.reply_text("\n".join(lines), parse_mode=ParseMode.HTML)
 
@@ -1061,6 +1187,7 @@ def main() -> None:
     application.add_handler(CommandHandler("myposts", myposts_command))
     application.add_handler(CommandHandler("mystats", mystats_command))
     application.add_handler(CommandHandler("searchuser", searchuser_command))
+    application.add_handler(CommandHandler("userlist", userlist_command))
     application.add_handler(CommandHandler("ban", ban_command))
     application.add_handler(CommandHandler("unban", unban_command))
     application.add_handler(CommandHandler("banned", banned_command))

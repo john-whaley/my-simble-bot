@@ -83,6 +83,7 @@ nano config.ini
 
 - `TOKEN`
 - `CHANNEL_ID`
+- `CHANNEL_LINK`
 - `ADMIN_IDS`
 - `USER_MESSAGE_COOLDOWN`
 - `BLACKLIST`

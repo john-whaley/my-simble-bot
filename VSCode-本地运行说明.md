@@ -23,49 +23,6 @@
 
 所以本地运行时，建议一定要先创建虚拟环境。
 
-在 VS Code 里打开终端：
-
-1. 点击 `终端 -> 新建终端`
-2. 在项目根目录执行：
-
-```powershell
-python -m venv .venv
-```
-
-## 4. 激活虚拟环境
-
-在 PowerShell 终端执行：
-
-```powershell
-.\.venv\Scripts\Activate.ps1
-```
-
-如果提示脚本执行被禁止，可以先执行：
-
-```powershell
-Set-ExecutionPolicy -Scope Process Bypass
-```
-
-然后再执行一次：
-
-```powershell
-.\.venv\Scripts\Activate.ps1
-```
-
-激活成功后，终端前面通常会出现 `(.venv)`。
-
-## 5. 让 VS Code 选中这个解释器
-
-1. 按 `Ctrl + Shift + P`
-2. 输入 `Python: Select Interpreter`
-3. 选择项目里的解释器：
-
-```text
-.venv\Scripts\python.exe
-```
-
-这一步很重要，不然 VS Code 可能还是会用系统里全局安装的旧依赖。
-
 ## 6. 安装依赖
 
 确认终端已经在虚拟环境里，再执行：
@@ -73,14 +30,6 @@ Set-ExecutionPolicy -Scope Process Bypass
 ```powershell
 pip install -r requirements.txt
 ```
-
-可以顺手检查版本：
-
-```powershell
-pip show python-telegram-bot
-```
-
-你应该看到版本是 `21.x` 或更高，而不是 `11.1.0`。
 
 ## 7. 配置机器人
 
@@ -90,6 +39,7 @@ pip show python-telegram-bot
 [BOT]
 TOKEN = 你的机器人 Token
 CHANNEL_ID = -100xxxxxxxxxx
+CHANNEL_LINK = @your_channel
 ADMIN_IDS = 123456789,987654321
 
 [FILTER]
@@ -99,8 +49,8 @@ BLACKLIST = 敏感词1,敏感词2,敏感词3
 说明：
 
 - `TOKEN` 从 `@BotFather` 获取
-- `CHANNEL_ID` 推荐填写频道真实 ID，格式一般是 `-100xxxxxxxxxx`
-- `ADMIN_IDS` 是管理员 Telegram 用户 ID，支持多个，用英文逗号分隔
+- `CHANNEL_ID` 推荐填写频道真实 ID，网页版进入频道右键检查，格式一般是 `-100xxxxxxxxxx`
+- `ADMIN_IDS` 用户 ID，支持多个，用英文逗号分隔
 - `BLACKLIST` 使用英文逗号分隔
 
 ## 8. 给机器人频道权限
