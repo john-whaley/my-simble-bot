@@ -136,7 +136,7 @@ def parse_generated_services() -> dict[str, str]:
             current_service = service_match.group(1)
             continue
 
-        config_match = re.search(r"\./(config\d+\.ini):/app/\1:ro", line)
+        config_match = re.search(r"CONFIG_FILE:\s+/app/(config\d+\.ini)", line)
         if current_service and config_match:
             service_for_config[config_match.group(1)] = current_service
 
@@ -296,7 +296,7 @@ def render_service(bot: BotDefinition) -> list[str]:
         "      TZ: Asia/Shanghai",
         f"      CONFIG_FILE: /app/{bot.config_filename}",
         "    volumes:",
-        f"      - ./{bot.config_filename}:/app/{bot.config_filename}:ro",
+        "      - ./:/app:ro",
         f"      - {bot.data_dir}:/app/data",
         f"      - {bot.logs_dir}:/app/logs",
         "    security_opt:",

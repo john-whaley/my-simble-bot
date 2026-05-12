@@ -13,7 +13,7 @@ services:
       TZ: Asia/Shanghai
       CONFIG_FILE: /app/config.ini
     volumes:
-      - ./config.ini:/app/config.ini:ro
+      - ./:/app:ro
       - ./data:/app/data
       - ./logs:/app/logs
     security_opt:
