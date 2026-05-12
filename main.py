@@ -812,7 +812,7 @@ async def myposts_command(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     if user is None or message is None:
         return
     if not is_admin(user.id, settings):
-        await message.reply_text("普通用户暂不支持使用这个命令。")
+        await message.reply_text("不支持使用这个命令。")
         return
 
     limit = 10
@@ -856,7 +856,7 @@ async def mystats_command(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     if user is None or message is None:
         return
     if not is_admin(user.id, settings):
-        await message.reply_text("普通用户暂不支持使用这个命令。")
+        await message.reply_text("不支持使用这个命令。")
         return
 
     stats = await asyncio.to_thread(get_user_stats, user.id)
