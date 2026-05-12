@@ -616,8 +616,6 @@ def build_user_commands() -> list[BotCommand]:
     return [
         BotCommand("start", "开始使用机器人"),
         BotCommand("help", "查看帮助"),
-        BotCommand("myposts", "查看我的投稿"),
-        BotCommand("mystats", "查看个人统计"),
     ]
 
 
@@ -800,9 +798,6 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         "直接给我发送文字，我会自动在频道发言。\n"
         "请不要攻击他人，不刷屏，不发布违法信息。\n"
         "我只接收文本信息，表情符号可以，图片、视频、语音、文件不会处理。\n\n"
-        "可用命令：\n"
-        "/myposts - 查看我的投稿\n"
-        "/mystats - 查看我的统计"
     )
 
 
@@ -813,7 +808,11 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
 async def myposts_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     user = update.effective_user
     message = update.effective_message
+    settings: Settings = context.application.bot_data["settings"]
     if user is None or message is None:
+        return
+    if not is_admin(user.id, settings):
+        await message.reply_text("普通用户暂不支持使用这个命令。")
         return
 
     limit = 10
@@ -853,7 +852,11 @@ async def myposts_command(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
 async def mystats_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     user = update.effective_user
     message = update.effective_message
+    settings: Settings = context.application.bot_data["settings"]
     if user is None or message is None:
+        return
+    if not is_admin(user.id, settings):
+        await message.reply_text("普通用户暂不支持使用这个命令。")
         return
 
     stats = await asyncio.to_thread(get_user_stats, user.id)
